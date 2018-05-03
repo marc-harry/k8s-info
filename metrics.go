@@ -28,6 +28,7 @@ import (
 	metricsv1alpha1api "k8s.io/metrics/pkg/apis/metrics/v1alpha1"
 )
 
+// Constants
 const (
 	DefaultHeapsterNamespace = "kube-system"
 	DefaultHeapsterScheme    = "http"
