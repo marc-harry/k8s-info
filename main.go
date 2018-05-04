@@ -12,6 +12,7 @@ import (
 
 	"github.com/olekukonko/tablewriter"
 
+	typesv1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -65,6 +66,14 @@ func getNodeStatuses(client *kubernetes.Clientset, metricClient *HeapsterMetrics
 	if err != nil {
 		panic(err.Error())
 	}
+	nodePods := map[string][]string{}
+	failingPods := map[string]typesv1.PodPhase{}
+	for _, pod := range pods.Items {
+		nodePods[pod.Spec.NodeName] = append(nodePods[pod.Spec.NodeName], pod.Name)
+		if pod.Status.Phase != typesv1.PodRunning {
+			failingPods[pod.Name] = pod.Status.Phase
+		}
+	}
 	data := [][]string{}
 	for _, node := range nodes.Items {
 		metrics, err := metricClient.GetNodeMetrics(node.Name, labels.Everything().String())
@@ -79,17 +88,15 @@ func getNodeStatuses(client *kubernetes.Clientset, metricClient *HeapsterMetrics
 			allocCPU := node.Status.Allocatable.Cpu()
 			memoryPer := getPercentage(memoryUsage, allocMemory)
 			cpuPer := getPercentage(cpuUsage, allocCPU)
-			podCount := 0
+			podCount := len(nodePods[node.Name])
 
-			for _, pod := range pods.Items {
-				if pod.Spec.NodeName == node.Name {
-					podCount++
-				}
-			}
 			data = append(data, []string{node.Name, asString(cpuUsage), asStringD(cpuPer), asString(memoryUsage), asStringD(memoryPer), strconv.Itoa(podCount)})
 		}
 	}
 	outputData(data)
+	if len(failingPods) > 0 {
+		outputFailing(failingPods)
+	}
 }
 
 func getPercentage(first *resource.Quantity, second *resource.Quantity) *inf.Dec {
@@ -106,6 +113,10 @@ func asStringD(res *inf.Dec) string {
 	return fmt.Sprintf("%d", res)
 }
 
+func asStringP(res typesv1.PodPhase) string {
+	return fmt.Sprintf("%s", res)
+}
+
 func homeDir() string {
 	if h := os.Getenv("HOME"); h != "" {
 		return h
@@ -117,6 +128,21 @@ func outputData(data [][]string) {
 	fmt.Printf("Kubernetes Stats at: %s\n", time.Now())
 	table := tablewriter.NewWriter(os.Stdout)
 	table.SetHeader([]string{"Node", "CPU Usage", "CPU %", "Mem Usage", "Mem %", "Pod Count"})
+	table.SetBorders(tablewriter.Border{Left: true, Top: false, Right: true, Bottom: false})
+	table.SetCenterSeparator("|")
+	table.AppendBulk(data)
+	table.Render()
+	fmt.Println()
+}
+
+func outputFailing(dataMap map[string]typesv1.PodPhase) {
+	data := [][]string{}
+	for podName, podInfo := range dataMap {
+		data = append(data, []string{podName, asStringP(podInfo)})
+	}
+	fmt.Printf("Failing Pod Stats at: %s\n", time.Now())
+	table := tablewriter.NewWriter(os.Stdout)
+	table.SetHeader([]string{"Pod", "Status"})
 	table.SetBorders(tablewriter.Border{Left: true, Top: false, Right: true, Bottom: false})
 	table.SetCenterSeparator("|")
 	table.AppendBulk(data)
