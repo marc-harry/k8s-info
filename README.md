@@ -16,5 +16,7 @@ N.B If vendor folder gets deleted running `godep restore ./...` will get all req
 
 ## Parameters
 * kubeconfig = Specify absolute path to kubeconfig file (Optional)
-* namespace  = Specify namespace to get resource from (Optional) (--namespace test OR -namespace=test)
-* watch      = Watch cluster at 15 sec interval (Optional) (--watch OR -watch)
+* namespace  = Specify namespace to get resource from (Optional) (`--namespace test` OR `-namespace=test`)
+* watch      = Watch cluster at 15 sec interval (Optional) (`--watch` OR `-watch`)
+* duration   = Set custom duration for watch in seconds (Optional) (`--duration 30`)
+* all        = Get resources for all namespaces overrides `--namespace` (Optional) (`--all`)

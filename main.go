@@ -28,11 +28,18 @@ const (
 func main() {
 	home := homeDir()
 	kubeconfig := flag.String("kubeconfig", filepath.Join(home, ".kube", "config"), "(optional) absolute path to the kubeconfig file")
-	watch := flag.Bool("watch", false, "(optional) watch at 15 sec intervals")
+	watch := flag.Bool("watch", false, "(optional) watch at intervals 15 second by default")
 	namespaceFlag := flag.String("namespace", DefaultNamespace, "(optional) get resources in particular namespace")
+	duration := flag.Int("duration", 15, "(optional) set watch interval to custom duration in seconds")
+	all := flag.Bool("all", false, "(optional) get all namespaces (this will override --namespace)")
 	flag.Parse()
 
 	namespace := *namespaceFlag
+	durationSeconds := *duration
+
+	if *all {
+		namespace = ""
+	}
 
 	// use the current context in kubeconfig
 	config, err := clientcmd.BuildConfigFromFlags("", *kubeconfig)
@@ -50,7 +57,7 @@ func main() {
 	if *watch {
 		for {
 			getNodeStatuses(client, metricClient, namespace)
-			time.Sleep(time.Second * 15)
+			time.Sleep(time.Second * time.Duration(durationSeconds))
 		}
 	} else {
 		getNodeStatuses(client, metricClient, namespace)
