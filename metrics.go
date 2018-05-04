@@ -1,19 +1,3 @@
-/*
-Copyright 2016 The Kubernetes Authors.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
 package main
 
 import (
@@ -45,6 +29,7 @@ var (
 	metricsGv = schema.GroupVersion{Group: "metrics", Version: "v1alpha1"}
 )
 
+// HeapsterMetricsClient heapster client definition
 type HeapsterMetricsClient struct {
 	SVCClient         corev1.ServicesGetter
 	HeapsterNamespace string
@@ -53,6 +38,7 @@ type HeapsterMetricsClient struct {
 	HeapsterPort      string
 }
 
+// NewHeapsterMetricsClient get client with custom heapster settings
 func NewHeapsterMetricsClient(svcClient corev1.ServicesGetter, namespace, scheme, service, port string) *HeapsterMetricsClient {
 	return &HeapsterMetricsClient{
 		SVCClient:         svcClient,
@@ -63,24 +49,26 @@ func NewHeapsterMetricsClient(svcClient corev1.ServicesGetter, namespace, scheme
 	}
 }
 
+// DefaultHeapsterMetricsClient get client with default heapster settings
 func DefaultHeapsterMetricsClient(svcClient corev1.ServicesGetter) *HeapsterMetricsClient {
 	return NewHeapsterMetricsClient(svcClient, DefaultHeapsterNamespace, DefaultHeapsterScheme, DefaultHeapsterService, DefaultHeapsterPort)
 }
 
-func podMetricsUrl(namespace string, name string) (string, error) {
+func podMetricsURL(namespace string, name string) (string, error) {
 	if namespace == metav1.NamespaceAll {
 		return fmt.Sprintf("%s/pods", metricsRoot), nil
 	}
 	return fmt.Sprintf("%s/namespaces/%s/pods/%s", metricsRoot, namespace, name), nil
 }
 
-func nodeMetricsUrl(name string) (string, error) {
+func nodeMetricsURL(name string) (string, error) {
 	return fmt.Sprintf("%s/nodes/%s", metricsRoot, name), nil
 }
 
+// GetNodeMetrics gets the metrics for a node
 func (cli *HeapsterMetricsClient) GetNodeMetrics(nodeName string, selector string) (*metricsapi.NodeMetricsList, error) {
 	params := map[string]string{"labelSelector": selector}
-	path, err := nodeMetricsUrl(nodeName)
+	path, err := nodeMetricsURL(nodeName)
 	if err != nil {
 		return nil, err
 	}
@@ -110,11 +98,12 @@ func (cli *HeapsterMetricsClient) GetNodeMetrics(nodeName string, selector strin
 	return metrics, nil
 }
 
+// GetPodMetrics gets the metrics for a pod
 func (cli *HeapsterMetricsClient) GetPodMetrics(namespace string, podName string, allNamespaces bool, selector labels.Selector) (*metricsapi.PodMetricsList, error) {
 	if allNamespaces {
 		namespace = metav1.NamespaceAll
 	}
-	path, err := podMetricsUrl(namespace, podName)
+	path, err := podMetricsURL(namespace, podName)
 	if err != nil {
 		return nil, err
 	}
@@ -147,6 +136,7 @@ func (cli *HeapsterMetricsClient) GetPodMetrics(namespace string, podName string
 	return metrics, nil
 }
 
+// GetHeapsterMetrics from Heapster service on cluster
 func GetHeapsterMetrics(cli *HeapsterMetricsClient, path string, params map[string]string) ([]byte, error) {
 	return cli.SVCClient.Services(cli.HeapsterNamespace).
 		ProxyGet(cli.HeapsterScheme, cli.HeapsterService, cli.HeapsterPort, path, params).

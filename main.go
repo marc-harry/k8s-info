@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"gopkg.in/inf.v0"
@@ -13,16 +14,24 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/metrics/pkg/apis/metrics"
+)
+
+// Default Constants
+const (
+	DefaultNamespace = "default"
 )
 
 func main() {
 	home := homeDir()
 	kubeconfig := flag.String("kubeconfig", filepath.Join(home, ".kube", "config"), "(optional) absolute path to the kubeconfig file")
 	watch := flag.Bool("watch", false, "(optional) watch at 15 sec intervals")
+	namespaceFlag := flag.String("namespace", DefaultNamespace, "(optional) get resources in particular namespace")
 	flag.Parse()
+
+	namespace := *namespaceFlag
 
 	// use the current context in kubeconfig
 	config, err := clientcmd.BuildConfigFromFlags("", *kubeconfig)
@@ -35,33 +44,33 @@ func main() {
 		panic(err.Error())
 	}
 
-	m := &metrics.NodeMetricsList{}
-	if m != nil {
-
-	}
-
 	metricClient := DefaultHeapsterMetricsClient(client.CoreV1())
 
 	if *watch {
 		for {
-			getNodeStatuses(client, metricClient)
+			getNodeStatuses(client, metricClient, namespace)
 			time.Sleep(time.Second * 15)
 		}
 	} else {
-		getNodeStatuses(client, metricClient)
+		getNodeStatuses(client, metricClient, namespace)
 	}
 }
 
-func getNodeStatuses(client *kubernetes.Clientset, metricClient *HeapsterMetricsClient) {
+func getNodeStatuses(client *kubernetes.Clientset, metricClient *HeapsterMetricsClient, namespace string) {
 	nodes, err := client.CoreV1().Nodes().List(v1.ListOptions{})
+	if err != nil {
+		panic(err.Error())
+	}
+	pods, err := client.CoreV1().Pods(namespace).List(v1.ListOptions{})
 	if err != nil {
 		panic(err.Error())
 	}
 	data := [][]string{}
 	for _, node := range nodes.Items {
-		metrics, err := metricClient.GetNodeMetrics(node.Name, "String")
+		metrics, err := metricClient.GetNodeMetrics(node.Name, labels.Everything().String())
 		if err != nil {
-			panic(err)
+			fmt.Printf("Failed to get metrics for Node: %s\n", node.Name)
+			continue
 		}
 		for _, metric := range metrics.Items {
 			memoryUsage := metric.Usage.Memory()
@@ -70,7 +79,14 @@ func getNodeStatuses(client *kubernetes.Clientset, metricClient *HeapsterMetrics
 			allocCPU := node.Status.Allocatable.Cpu()
 			memoryPer := getPercentage(memoryUsage, allocMemory)
 			cpuPer := getPercentage(cpuUsage, allocCPU)
-			data = append(data, []string{node.Name, asString(cpuUsage), asStringD(cpuPer), asString(memoryUsage), asStringD(memoryPer)})
+			podCount := 0
+
+			for _, pod := range pods.Items {
+				if pod.Spec.NodeName == node.Name {
+					podCount++
+				}
+			}
+			data = append(data, []string{node.Name, asString(cpuUsage), asStringD(cpuPer), asString(memoryUsage), asStringD(memoryPer), strconv.Itoa(podCount)})
 		}
 	}
 	outputData(data)
@@ -100,7 +116,7 @@ func homeDir() string {
 func outputData(data [][]string) {
 	fmt.Printf("Kubernetes Stats at: %s\n", time.Now())
 	table := tablewriter.NewWriter(os.Stdout)
-	table.SetHeader([]string{"Node", "CPU Usage", "CPU %", "Mem Usage", "Mem %"})
+	table.SetHeader([]string{"Node", "CPU Usage", "CPU %", "Mem Usage", "Mem %", "Pod Count"})
 	table.SetBorders(tablewriter.Border{Left: true, Top: false, Right: true, Bottom: false})
 	table.SetCenterSeparator("|")
 	table.AppendBulk(data)
