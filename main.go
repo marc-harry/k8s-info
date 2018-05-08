@@ -32,6 +32,7 @@ func main() {
 	namespaceFlag := flag.String("namespace", DefaultNamespace, "(optional) get resources in particular namespace")
 	duration := flag.Int("duration", 15, "(optional) set watch interval to custom duration in seconds")
 	all := flag.Bool("all", false, "(optional) get all namespaces (this will override --namespace)")
+	metric := flag.String("metric", "nodes", "(required) Metric {nodes|pods};.")
 	flag.Parse()
 
 	namespace := *namespaceFlag
@@ -56,12 +57,55 @@ func main() {
 
 	if *watch {
 		for {
-			getNodeStatuses(client, metricClient, namespace)
+			processRequest(client, metricClient, namespace, *metric)
 			time.Sleep(time.Second * time.Duration(durationSeconds))
 		}
 	} else {
-		getNodeStatuses(client, metricClient, namespace)
+		processRequest(client, metricClient, namespace, *metric)
 	}
+}
+
+func processRequest(client *kubernetes.Clientset, metricClient *HeapsterMetricsClient, namespace string, metric string) {
+	switch metric {
+	case "nodes":
+		getNodeStatuses(client, metricClient, namespace)
+	case "pods":
+		getPodStatuses(client, metricClient, namespace)
+	default:
+		fmt.Println("Invalid metric supplied.")
+		os.Exit(1)
+	}
+}
+
+func getPodStatuses(client *kubernetes.Clientset, metricClient *HeapsterMetricsClient, namespace string) {
+	pods, err := client.CoreV1().Pods(namespace).List(v1.ListOptions{})
+	if err != nil {
+		panic(err.Error())
+	}
+	data := [][]string{}
+
+	for _, pod := range pods.Items {
+		metrics, err := metricClient.GetPodMetrics(namespace, pod.Name, false, labels.Everything())
+		if err != nil {
+			fmt.Printf("Failed to get logs for Pod: %s", pod.Name)
+			continue
+		}
+		node, err := client.CoreV1().Nodes().Get(pod.Spec.NodeName, v1.GetOptions{})
+		if err != nil {
+			panic(err.Error())
+		}
+		for _, metric := range metrics.Items {
+			memoryUsage := metric.Containers[0].Usage.Memory()
+			allocMemory := node.Status.Allocatable.Memory()
+			cpuUsage := metric.Containers[0].Usage.Cpu()
+			allocCPU := node.Status.Allocatable.Cpu()
+			memoryPer := getPercentage(memoryUsage, allocMemory)
+			cpuPer := getPercentage(cpuUsage, allocCPU)
+
+			data = append(data, []string{pod.Name, pod.Spec.NodeName, asString(cpuUsage), asStringD(cpuPer), asString(memoryUsage), asStringD(memoryPer)})
+		}
+	}
+	outputPodData(data)
 }
 
 func getNodeStatuses(client *kubernetes.Clientset, metricClient *HeapsterMetricsClient, namespace string) {
@@ -100,7 +144,7 @@ func getNodeStatuses(client *kubernetes.Clientset, metricClient *HeapsterMetrics
 			data = append(data, []string{node.Name, asString(cpuUsage), asStringD(cpuPer), asString(memoryUsage), asStringD(memoryPer), strconv.Itoa(podCount)})
 		}
 	}
-	outputData(data)
+	outputNodeData(data)
 	if len(failingPods) > 0 {
 		outputFailing(failingPods)
 	}
@@ -131,10 +175,21 @@ func homeDir() string {
 	return os.Getenv("USERPROFILE") // windows
 }
 
-func outputData(data [][]string) {
-	fmt.Printf("Kubernetes Stats at: %s\n", time.Now())
+func outputNodeData(data [][]string) {
+	fmt.Printf("Kubernetes Node Stats at: %s\n", time.Now())
 	table := tablewriter.NewWriter(os.Stdout)
 	table.SetHeader([]string{"Node", "CPU Usage", "CPU %", "Mem Usage", "Mem %", "Pod Count"})
+	table.SetBorders(tablewriter.Border{Left: true, Top: false, Right: true, Bottom: false})
+	table.SetCenterSeparator("|")
+	table.AppendBulk(data)
+	table.Render()
+	fmt.Println()
+}
+
+func outputPodData(data [][]string) {
+	fmt.Printf("Kubernetes Pod Stats at: %s\n", time.Now())
+	table := tablewriter.NewWriter(os.Stdout)
+	table.SetHeader([]string{"Pod", "Node", "CPU Usage", "CPU %", "Mem Usage", "Mem %"})
 	table.SetBorders(tablewriter.Border{Left: true, Top: false, Right: true, Bottom: false})
 	table.SetCenterSeparator("|")
 	table.AppendBulk(data)
