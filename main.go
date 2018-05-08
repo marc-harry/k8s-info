@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"time"
 
@@ -84,27 +85,16 @@ func getPodStatuses(client *kubernetes.Clientset, metricClient *HeapsterMetricsC
 	}
 	data := [][]string{}
 
+	stats := make(chan []string)
+	statCount := len(pods.Items)
 	for _, pod := range pods.Items {
-		metrics, err := metricClient.GetPodMetrics(namespace, pod.Name, false, labels.Everything())
-		if err != nil {
-			fmt.Printf("Failed to get logs for Pod: %s", pod.Name)
-			continue
-		}
-		node, err := client.CoreV1().Nodes().Get(pod.Spec.NodeName, v1.GetOptions{})
-		if err != nil {
-			panic(err.Error())
-		}
-		for _, metric := range metrics.Items {
-			memoryUsage := metric.Containers[0].Usage.Memory()
-			allocMemory := node.Status.Allocatable.Memory()
-			cpuUsage := metric.Containers[0].Usage.Cpu()
-			allocCPU := node.Status.Allocatable.Cpu()
-			memoryPer := getPercentage(memoryUsage, allocMemory)
-			cpuPer := getPercentage(cpuUsage, allocCPU)
-
-			data = append(data, []string{pod.Name, pod.Spec.NodeName, asString(cpuUsage), asStringD(cpuPer), asString(memoryUsage), asStringD(memoryPer)})
-		}
+		go getPodStats(stats, client, metricClient, namespace, pod)
 	}
+
+	for statCount != len(data) {
+		data = append(data, <-stats)
+	}
+	sort.Sort(byName(data))
 	outputPodData(data)
 }
 
@@ -210,4 +200,38 @@ func outputFailing(dataMap map[string]typesv1.PodPhase) {
 	table.AppendBulk(data)
 	table.Render()
 	fmt.Println()
+}
+
+func getPodStats(stats chan<- []string, client *kubernetes.Clientset, metricClient *HeapsterMetricsClient, namespace string, pod typesv1.Pod) {
+	metrics, err := metricClient.GetPodMetrics(namespace, pod.Name, false, labels.Everything())
+	if err != nil {
+		fmt.Printf("Failed to get logs for Pod: %s", pod.Name)
+		stats <- nil
+	}
+	node, err := client.CoreV1().Nodes().Get(pod.Spec.NodeName, v1.GetOptions{})
+	if err != nil {
+		panic(err.Error())
+	}
+	for _, metric := range metrics.Items {
+		memoryUsage := metric.Containers[0].Usage.Memory()
+		allocMemory := node.Status.Allocatable.Memory()
+		cpuUsage := metric.Containers[0].Usage.Cpu()
+		allocCPU := node.Status.Allocatable.Cpu()
+		memoryPer := getPercentage(memoryUsage, allocMemory)
+		cpuPer := getPercentage(cpuUsage, allocCPU)
+
+		stats <- []string{pod.Name, pod.Spec.NodeName, asString(cpuUsage), asStringD(cpuPer), asString(memoryUsage), asStringD(memoryPer)}
+	}
+}
+
+type byName [][]string
+
+func (s byName) Len() int {
+	return len(s)
+}
+func (s byName) Swap(i, j int) {
+	s[i], s[j] = s[j], s[i]
+}
+func (s byName) Less(i, j int) bool {
+	return s[i][0] < s[j][0]
 }
