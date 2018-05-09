@@ -15,6 +15,7 @@ Command line utility to get basic metrics and pod breakdown of a kubernetes clus
 N.B If vendor folder gets deleted running `godep restore ./...` will get all required packages
 
 ## Parameters
+* metric     = Specify what type of metrics {nodes|pods} (Required) (nodes by default) (`--metric pods`)
 * kubeconfig = Specify absolute path to kubeconfig file (Optional)
 * namespace  = Specify namespace to get resource from (Optional) (`--namespace test` OR `-namespace=test`)
 * watch      = Watch cluster at 15 sec interval (Optional) (`--watch` OR `-watch`)
