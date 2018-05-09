@@ -61,7 +61,13 @@ func main() {
 
 	metricClient := DefaultHeapsterMetricsClient(client.CoreV1())
 
-	service := &KubeInfoService{client.CoreV1(), metricClient, namespace, *all, *metric}
+	service := &KubeInfoService{
+		Client:        client.CoreV1(),
+		MetricClient:  metricClient,
+		Namespace:     namespace,
+		AllNamespaces: *all,
+		Metric:        *metric,
+	}
 	if *watch {
 		for {
 			processRequest(service)
